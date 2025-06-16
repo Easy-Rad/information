@@ -3,14 +3,17 @@ module Main exposing (..)
 import Browser
 import Browser.Navigation as Nav
 import Dict exposing (Dict)
-import Html exposing (Html, a, b, button, div, h1, h2, h3, li, table, tbody, td, text, th, thead, tr, ul)
-import Html.Attributes exposing (attribute, href, style)
-import Html.Events exposing (onClick)
+import Element exposing (Column, Element, IndexedColumn, alignRight, centerY, column, el, fill, indexedTable, layout, link, padding, rgb255, row, spacing, table, text, width)
+import Element.Border as Border
+import Element.Font as Font
+import Element.Input exposing (button)
+import Html exposing (a)
 import Http
 import Json.Decode exposing (Decoder)
-import List exposing (range)
+import List exposing (head, range)
 import Maybe exposing (withDefault)
-import Url
+import Url exposing (Protocol(..))
+import Url.Builder
 import Url.Parser exposing ((</>), Parser, fragment, oneOf, s, string, top)
 
 
@@ -227,34 +230,39 @@ subscriptions _ =
 -- VIEW
 
 
+anchor : List (Element.Attribute msg)
+anchor =
+    [ Font.color (rgb255 0 0 255)
+    , Font.underline
+    ]
+
+
 view : Model -> Browser.Document Msg
 view model =
     { title = "Information"
     , body =
-        [ ul []
-            [ li [] [ a [ href "/" ] [ text "Home" ] ]
-            , li [] [ a [ href "/base_roster" ] [ text "Base roster" ] ]
+        [ column [ spacing 10 ]
+            [ row [ spacing 10 ]
+                [ link anchor { url = "/", label = text "Home" }
+                , link anchor { url = "/base_roster", label = text "Base roster" }
+                ]
+            , viewBaseRoster model
             ]
-        , viewBaseRoster model
+            |> layout [ padding 10 ]
         ]
     }
 
 
-viewLink : String -> Html msg
-viewLink path =
-    li [] [ a [ href path ] [ text path ] ]
-
-
-viewBaseRoster : Model -> Html Msg
+viewBaseRoster : Model -> Element msg
 viewBaseRoster model =
     case model.data of
         Home ->
             text "Information lies here."
 
         BaseRosterHome ->
-            div []
-                [ a [ href "/base_roster/users" ] [ h3 [] [ text "Users" ] ]
-                , a [ href "/base_roster/shifts" ] [ h3 [] [ text "Shifts" ] ]
+            row [ spacing 10 ]
+                [ link anchor { url = "/base_roster/users", label = text "Users" }
+                , link anchor { url = "/base_roster/shifts", label = text "Shifts" }
                 ]
 
         Failure ->
@@ -264,90 +272,75 @@ viewBaseRoster model =
             text "Loading..."
 
         LoadedBaseRosterUsers users ->
-            viewUsers users
+            viewList "Users" users viewItemUser
 
         LoadedBaseRosterShifts shifts ->
-            viewShifts shifts
+            viewList "Shifts" shifts viewItemShift
 
         LoadedBaseRosterUser user base_roster_user ->
-            viewRosterGrid ("User: " ++ user) viewItemShift base_roster_user
+            viewRosterGrid ("User: " ++ user) (viewCell base_roster_user viewItemShift)
 
         LoadedBaseRosterShift shift base_roster_shift ->
-            viewRosterGrid ("Shift: " ++ shift) viewItemUser base_roster_shift
+            viewRosterGrid ("Shift: " ++ shift) (viewCell base_roster_shift viewItemUser)
 
 
-viewUsers : List UserAssignment -> Html Msg
-viewUsers users =
-    div []
-        [ h3 [] [ text "Users" ]
-        , users
-            |> List.map (viewItemUser >> List.singleton >> li [])
-            |> ul []
+viewList : String -> List a -> (a -> Element msg) -> Element msg
+viewList title items transform =
+    column []
+        [ text title
+        , items
+            |> List.map transform
+            |> column []
         ]
 
 
-viewShifts : List Shift -> Html Msg
-viewShifts shifts =
-    div []
-        [ h3 [] [ text "Shifts" ]
-        , shifts
-            |> List.map (viewItemShift >> List.singleton >> li [])
-            |> ul []
-        ]
+viewRosterGrid : String -> (Int -> Int -> Element msg) -> Element msg
+viewRosterGrid title transform =
+    let
+        headerAttrs : List (Element.Attribute msg)
+        headerAttrs =
+            [ Font.bold
+            , Font.center
 
-
-viewRosterGrid : String -> (a -> Html Msg) -> Dict String (List a) -> Html Msg
-viewRosterGrid header transform base_roster =
-    div []
-        [ h3 [] [ text header ]
-        , table []
-            [ [ "Monday"
-              , "Tuesday"
-              , "Wednesday"
-              , "Thursday"
-              , "Friday"
-              ]
-                |> List.map (\day -> th [ attribute "scope" "col" ] [ text day ])
-                |> (::) (th [] [])
-                |> tr []
-                |> List.singleton
-                |> thead []
-            , range 1 4 |> List.map (viewRosterWeek transform base_roster) |> tbody []
+            -- , Border.color (rgb255 0 0 0)
+            , Border.width 1
             ]
+
+        columns : List (IndexedColumn Int msg)
+        columns =
+            [ "Monday"
+            , "Tuesday"
+            , "Wednesday"
+            , "Thursday"
+            , "Friday"
+            ]
+                |> List.map (\dayName -> IndexedColumn (text dayName |> el headerAttrs) fill transform)
+    in
+    column [ spacing 10 ]
+        [ text title
+        , indexedTable [ Border.width 1 ]
+            { data = range 0 3
+            , columns = columns
+            }
         ]
 
 
-viewRosterWeek : (a -> Html Msg) -> Dict String (List a) -> Int -> Html Msg
-viewRosterWeek transform base_roster week =
-    range 1 5
-        |> List.map (viewRosterCell transform base_roster week)
-        |> (::) (th [ attribute "scope" "row" ] [ "Week " ++ String.fromInt week |> text ])
-        |> tr []
+viewCell : Dict String (List a) -> (a -> Element msg) -> Int -> Int -> Element msg
+viewCell base_roster transform dayIndex weekIndex =
+    Dict.get (weekIndex * 7 + (dayIndex + 1) |> String.fromInt) base_roster
+        |> Maybe.withDefault []
+        |> List.map transform
+        |> column [ padding 10, Border.width 1 ]
 
 
-viewRosterCell : (a -> Html Msg) -> Dict String (List a) -> Int -> Int -> Html Msg
-viewRosterCell transform base_roster week day =
-    Dict.get ((week - 1) * 7 + day |> String.fromInt) base_roster
-        |> viewRosterDay transform
-        |> List.singleton
-        |> td []
-
-
-viewRosterDay : (a -> Html Msg) -> Maybe (List a) -> Html Msg
-viewRosterDay transform assignments =
-    withDefault [] assignments
-        |> List.map (transform >> List.singleton >> li [])
-        |> ul []
-
-
-viewItemShift : String -> Html Msg
+viewItemShift : String -> Element msg
 viewItemShift shift =
-    a [ href ("/base_roster/shift/" ++ shift) ] [ text shift ]
+    link anchor { url = "/base_roster/shift/" ++ shift, label = text shift }
 
 
-viewItemUser : UserAssignment -> Html Msg
+viewItemUser : UserAssignment -> Element msg
 viewItemUser user =
-    a [ href ("/base_roster/user/" ++ user.user) ] [ user.lastname ++ ", " ++ user.firstname |> text ]
+    link anchor { url = "/base_roster/user/" ++ user.user, label = user.lastname ++ ", " ++ user.firstname |> text }
 
 
 
