@@ -11,6 +11,8 @@ import Http
 import Json.Decode exposing (Decoder)
 import List exposing (range)
 import Maybe
+import Task
+import Time exposing (Month(..))
 import Tuple exposing (first, second)
 import Url
 import Url.Parser exposing ((</>), Parser, oneOf, s, string, top)
@@ -43,6 +45,11 @@ type Route
     | BaseRosterShiftsRoute
     | BaseRosterUserRoute User
     | BaseRosterShiftRoute Shift
+    | RequestsHomeRoute
+    | RequestsUsersRoute
+    | RequestsShiftsRoute
+    | RequestsUserRoute User
+    | RequestsShiftRoute Shift
 
 
 routeParser : Parser (Route -> a) a
@@ -54,6 +61,11 @@ routeParser =
         , Url.Parser.map BaseRosterShiftsRoute (s "base_roster" </> s "shifts")
         , Url.Parser.map BaseRosterUserRoute (s "base_roster" </> s "user" </> string)
         , Url.Parser.map BaseRosterShiftRoute (s "base_roster" </> s "shift" </> string)
+        , Url.Parser.map RequestsHomeRoute (s "requests")
+        , Url.Parser.map RequestsUsersRoute (s "requests" </> s "users")
+        , Url.Parser.map RequestsShiftsRoute (s "requests" </> s "shifts")
+        , Url.Parser.map RequestsUserRoute (s "requests" </> s "user" </> string)
+        , Url.Parser.map RequestsShiftRoute (s "requests" </> s "shift" </> string)
         ]
 
 
@@ -62,6 +74,9 @@ stepUrl url model =
     let
         ( data, cmd ) =
             case Url.Parser.parse routeParser url of
+                Nothing ->
+                    ( Failure, Nav.pushUrl model.key "/" )
+
                 Just HomeRoute ->
                     ( Home, Cmd.none )
 
@@ -74,14 +89,26 @@ stepUrl url model =
                 Just BaseRosterShiftsRoute ->
                     ( Loading, getBaseRosterShifts )
 
+                Just RequestsHomeRoute ->
+                    ( RequestsHome, Cmd.none )
+
                 Just (BaseRosterUserRoute user) ->
                     ( Loading, getBaseRosterUser user )
 
                 Just (BaseRosterShiftRoute shift) ->
                     ( Loading, getBaseRosterShift shift )
 
-                Nothing ->
-                    ( Failure, Nav.pushUrl model.key "/base_roster" )
+                Just RequestsUsersRoute ->
+                    ( Loading, getRequestsUsers )
+
+                Just RequestsShiftsRoute ->
+                    ( Loading, getRequestsShifts )
+
+                Just (RequestsUserRoute user) ->
+                    ( Loading, getRequestsUser user )
+
+                Just (RequestsShiftRoute shift) ->
+                    ( Loading, getRequestsShift shift )
     in
     ( { model | url = url, data = data }, cmd )
 
@@ -93,6 +120,7 @@ stepUrl url model =
 type alias Model =
     { key : Nav.Key
     , url : Url.Url
+    , zone : Time.Zone
     , data : Data
     }
 
@@ -116,11 +144,32 @@ type Data
     = Failure
     | Home
     | BaseRosterHome
+    | RequestsHome
     | Loading
     | LoadedBaseRosterUsers (List UserAssignment)
     | LoadedBaseRosterShifts (List Shift)
     | LoadedBaseRosterUser BaseRosterUser
     | LoadedBaseRosterShift BaseRosterShift
+    | LoadedRequestsUsers (List UserAssignment)
+    | LoadedRequestsShifts (List Shift)
+    | LoadedRequestsUser (List RequestUser)
+    | LoadedRequestsShift (List RequestShift)
+
+
+type alias RequestShift =
+    { added : Time.Posix
+    , start : Time.Posix
+    , finish : Time.Posix
+    , user : UserAssignment
+    }
+
+
+type alias RequestUser =
+    { start : Time.Posix
+    , finish : Time.Posix
+    , added : Time.Posix
+    , shift : Shift
+    }
 
 
 type alias BaseRosterUser =
@@ -133,7 +182,7 @@ type alias BaseRosterShift =
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init _ url key =
-    stepUrl url { key = key, url = url, data = Loading }
+    ( { key = key, url = url, zone = Time.utc, data = Loading }, Time.here |> Task.perform InitWithZone )
 
 
 
@@ -141,17 +190,29 @@ init _ url key =
 
 
 type Msg
-    = LinkClicked Browser.UrlRequest
+    = InitWithZone Time.Zone
+    | LinkClicked Browser.UrlRequest
     | UrlChanged Url.Url
     | GotBaseRosterUsers (Result Http.Error (List UserAssignment))
     | GotBaseRosterShifts (Result Http.Error (List Shift))
     | GotBaseRosterUser (Result Http.Error BaseRosterUser)
     | GotBaseRosterShift (Result Http.Error BaseRosterShift)
+    | GotRequestsUsers (Result Http.Error (List UserAssignment))
+    | GotRequestsShifts (Result Http.Error (List Shift))
+    | GotRequestsUser (Result Http.Error (List RequestUser))
+    | GotRequestsShift (Result Http.Error (List RequestShift))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        InitWithZone zone ->
+            let
+                newModel =
+                    { model | zone = zone }
+            in
+            stepUrl newModel.url newModel
+
         GotBaseRosterUsers result ->
             ( { model
                 | data =
@@ -197,6 +258,58 @@ update msg model =
                     case result of
                         Ok base_roster ->
                             LoadedBaseRosterShift base_roster
+
+                        Err _ ->
+                            Failure
+              }
+            , Cmd.none
+            )
+
+        GotRequestsUsers result ->
+            ( { model
+                | data =
+                    case result of
+                        Ok users ->
+                            LoadedRequestsUsers users
+
+                        Err _ ->
+                            Failure
+              }
+            , Cmd.none
+            )
+
+        GotRequestsShifts result ->
+            ( { model
+                | data =
+                    case result of
+                        Ok shifts ->
+                            LoadedRequestsShifts shifts
+
+                        Err _ ->
+                            Failure
+              }
+            , Cmd.none
+            )
+
+        GotRequestsUser result ->
+            ( { model
+                | data =
+                    case result of
+                        Ok requests ->
+                            LoadedRequestsUser requests
+
+                        Err _ ->
+                            Failure
+              }
+            , Cmd.none
+            )
+
+        GotRequestsShift result ->
+            ( { model
+                | data =
+                    case result of
+                        Ok requests ->
+                            LoadedRequestsShift requests
 
                         Err _ ->
                             Failure
@@ -313,11 +426,20 @@ viewNavBar route =
         baseRosterLink =
             navBarLink "/base_roster" "Base roster"
 
+        requestsLink =
+            navBarLink "/requests" "Requests"
+
         baseRosterUsersLink =
             navBarLink "/base_roster/users" "Users"
 
         baseRosterShiftsLink =
             navBarLink "/base_roster/shifts" "Shifts"
+
+        requestsUsersLink =
+            navBarLink "/requests/users" "Users"
+
+        requestsShiftsLink =
+            navBarLink "/requests/shifts" "Shifts"
 
         links : List (Bool -> Element msg)
         links =
@@ -325,6 +447,10 @@ viewNavBar route =
                 :: (case route of
                         Just BaseRosterHomeRoute ->
                             [ baseRosterLink
+                            ]
+
+                        Just RequestsHomeRoute ->
+                            [ requestsLink
                             ]
 
                         Just BaseRosterUsersRoute ->
@@ -347,6 +473,18 @@ viewNavBar route =
                             [ baseRosterLink
                             , baseRosterShiftsLink
                             , navBarLink ("/base_roster/shift/" ++ shift) (percentDecode shift)
+                            ]
+
+                        Just (RequestsUserRoute user) ->
+                            [ requestsLink
+                            , requestsUsersLink
+                            , navBarLink ("/requests/user/" ++ user) user
+                            ]
+
+                        Just (RequestsShiftRoute shift) ->
+                            [ requestsLink
+                            , requestsShiftsLink
+                            , navBarLink ("/requests/shift/" ++ shift) (percentDecode shift)
                             ]
 
                         _ ->
@@ -377,12 +515,19 @@ viewBaseRoster model =
         Home ->
             viewSubMenu
                 [ ( "/base_roster", "Base Roster" )
+                , ( "/requests", "Requests" )
                 ]
 
         BaseRosterHome ->
             viewSubMenu
                 [ ( "/base_roster/users", "Users" )
                 , ( "/base_roster/shifts", "Shifts" )
+                ]
+
+        RequestsHome ->
+            viewSubMenu
+                [ ( "/requests/users", "Users" )
+                , ( "/requests/shifts", "Shifts" )
                 ]
 
         Failure ->
@@ -402,6 +547,104 @@ viewBaseRoster model =
 
         LoadedBaseRosterShift base_roster_shift ->
             viewCell base_roster_shift transformUser |> viewRosterGrid
+
+        LoadedRequestsUsers users ->
+            users |> List.map transformRequestUser |> viewSubMenu
+
+        LoadedRequestsShifts shifts ->
+            shifts |> List.map transformRequestShift |> viewSubMenu
+
+        LoadedRequestsUser requests ->
+            viewRequests model.zone "User" (.shift >> transformRequestShift) requests
+
+        LoadedRequestsShift requests ->
+            viewRequests model.zone "Shifts" (.user >> transformRequestUser) requests
+
+
+toMonth : Month -> Int
+toMonth month =
+    case month of
+        Jan ->
+            1
+
+        Feb ->
+            2
+
+        Mar ->
+            3
+
+        Apr ->
+            4
+
+        May ->
+            5
+
+        Jun ->
+            6
+
+        Jul ->
+            7
+
+        Aug ->
+            8
+
+        Sep ->
+            9
+
+        Oct ->
+            10
+
+        Nov ->
+            11
+
+        Dec ->
+            12
+
+
+posixToString : Time.Zone -> Time.Posix -> String
+posixToString zone posix =
+    (Time.toDay zone posix |> String.fromInt |> String.padLeft 2 '0')
+        ++ "/"
+        ++ (Time.toMonth zone posix |> toMonth |> String.fromInt |> String.padLeft 2 '0')
+        ++ "/"
+        ++ (Time.toYear zone posix |> String.fromInt)
+        ++ " "
+        ++ (Time.toHour zone posix |> String.fromInt |> String.padLeft 2 '0')
+        ++ ":"
+        ++ (Time.toMinute zone posix |> String.fromInt |> String.padLeft 2 '0')
+
+
+viewRequests : Time.Zone -> String -> ({ request | start : Time.Posix, finish : Time.Posix, added : Time.Posix } -> ( String, String )) -> List { request | start : Time.Posix, finish : Time.Posix, added : Time.Posix } -> Element msg
+viewRequests zone header transform requests =
+    let
+        viewPosix : Time.Posix -> Element msg
+        viewPosix =
+            posixToString zone >> text
+
+        viewShift : ( String, String ) -> Element msg
+        viewShift ( url, label ) =
+            link anchor { url = url, label = text label }
+
+        -- link anchor { url = "/requests/shift/" ++ shift, label = text shift }
+        padCell : Element msg -> Element msg
+        padCell =
+            el [ paddingXY 4 0 ]
+
+        headerCell : String -> Element msg
+        headerCell =
+            text >> el [ Font.bold, paddingXY 4 0 ]
+    in
+    table
+        [ spacing 8
+        ]
+        { data = requests
+        , columns =
+            [ Column (headerCell header) fill (transform >> viewShift >> padCell)
+            , Column (headerCell "Start") shrink (.start >> viewPosix >> padCell)
+            , Column (headerCell "Finish") shrink (.finish >> viewPosix >> padCell)
+            , Column (headerCell "Added") shrink (.added >> viewPosix >> padCell)
+            ]
+        }
 
 
 viewRosterGrid : (Int -> Int -> Element msg) -> Element msg
@@ -460,19 +703,39 @@ transformUser user =
     ( "/base_roster/user/" ++ user.user, user.lastname ++ ", " ++ user.firstname )
 
 
+transformRequestShift : Shift -> ( String, String )
+transformRequestShift shift =
+    ( "/requests/shift/" ++ shift, shift )
+
+
+transformRequestUser : UserAssignment -> ( String, String )
+transformRequestUser user =
+    ( "/requests/user/" ++ user.user, user.lastname ++ ", " ++ user.firstname )
+
+
 
 -- HTTP
 
 
-baseRosterUrl : String
-baseRosterUrl =
+apiBaseUrl : String
+apiBaseUrl =
     "https://api.easyrad.duckdns.org"
+
+
+apiBaseRosterUrl : String
+apiBaseRosterUrl =
+    apiBaseUrl ++ "/base_roster"
+
+
+apiRequestsUrl : String
+apiRequestsUrl =
+    apiBaseUrl ++ "/requests"
 
 
 getBaseRosterUsers : Cmd Msg
 getBaseRosterUsers =
     Http.get
-        { url = baseRosterUrl ++ "/base_roster/users"
+        { url = apiBaseRosterUrl ++ "/users"
         , expect = Http.expectJson GotBaseRosterUsers (Json.Decode.list userAssignmentDecoder)
         }
 
@@ -480,7 +743,7 @@ getBaseRosterUsers =
 getBaseRosterShifts : Cmd Msg
 getBaseRosterShifts =
     Http.get
-        { url = baseRosterUrl ++ "/base_roster/shifts"
+        { url = apiBaseRosterUrl ++ "/shifts"
         , expect = Http.expectJson GotBaseRosterShifts (Json.Decode.list Json.Decode.string)
         }
 
@@ -488,7 +751,7 @@ getBaseRosterShifts =
 getBaseRosterUser : User -> Cmd Msg
 getBaseRosterUser user =
     Http.get
-        { url = baseRosterUrl ++ "/base_roster/user/" ++ user
+        { url = apiBaseRosterUrl ++ "/user/" ++ user
         , expect = Http.expectJson GotBaseRosterUser baseRosterUserDecoder
         }
 
@@ -496,8 +759,40 @@ getBaseRosterUser user =
 getBaseRosterShift : Shift -> Cmd Msg
 getBaseRosterShift shift =
     Http.get
-        { url = baseRosterUrl ++ "/base_roster/shift/" ++ shift
+        { url = apiBaseRosterUrl ++ "/shift/" ++ shift
         , expect = Http.expectJson GotBaseRosterShift baseRosterShiftDecoder
+        }
+
+
+getRequestsUsers : Cmd Msg
+getRequestsUsers =
+    Http.get
+        { url = apiRequestsUrl ++ "/users"
+        , expect = Http.expectJson GotRequestsUsers (Json.Decode.list userAssignmentDecoder)
+        }
+
+
+getRequestsShifts : Cmd Msg
+getRequestsShifts =
+    Http.get
+        { url = apiRequestsUrl ++ "/shifts"
+        , expect = Http.expectJson GotRequestsShifts (Json.Decode.list Json.Decode.string)
+        }
+
+
+getRequestsUser : User -> Cmd Msg
+getRequestsUser user =
+    Http.get
+        { url = apiRequestsUrl ++ "/user/" ++ user
+        , expect = Http.expectJson GotRequestsUser (Json.Decode.list requestUserDecoder)
+        }
+
+
+getRequestsShift : Shift -> Cmd Msg
+getRequestsShift shift =
+    Http.get
+        { url = apiRequestsUrl ++ "/shift/" ++ shift
+        , expect = Http.expectJson GotRequestsShift (Json.Decode.list requestShiftDecoder)
         }
 
 
@@ -522,3 +817,30 @@ userAssignmentDecoder =
         (Json.Decode.index 0 Json.Decode.string)
         (Json.Decode.index 1 Json.Decode.string)
         (Json.Decode.index 2 Json.Decode.string)
+
+
+requestUserDecoder : Decoder RequestUser
+requestUserDecoder =
+    Json.Decode.map4 RequestUser
+        (Json.Decode.index 0 posixDecoder)
+        (Json.Decode.index 1 posixDecoder)
+        (Json.Decode.index 2 posixDecoder)
+        (Json.Decode.index 3 Json.Decode.string)
+
+
+requestShiftDecoder : Decoder RequestShift
+requestShiftDecoder =
+    Json.Decode.map4 RequestShift
+        (Json.Decode.index 0 posixDecoder)
+        (Json.Decode.index 1 posixDecoder)
+        (Json.Decode.index 2 posixDecoder)
+    <|
+        Json.Decode.map3 UserAssignment
+            (Json.Decode.index 3 Json.Decode.string)
+            (Json.Decode.index 4 Json.Decode.string)
+            (Json.Decode.index 5 Json.Decode.string)
+
+
+posixDecoder : Decoder Time.Posix
+posixDecoder =
+    Json.Decode.map ((*) 1000 >> Time.millisToPosix) Json.Decode.int
