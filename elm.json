@@ -13,6 +13,7 @@
             "elm/json": "1.1.3",
             "elm/time": "1.0.0",
             "elm/url": "1.0.0",
+            "justinmimbs/timezone-data": "11.1.0",
             "mdgriffith/elm-ui": "1.1.8"
         },
         "indirect": {
