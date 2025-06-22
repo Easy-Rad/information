@@ -3,8 +3,8 @@ module Main exposing (..)
 import BaseRoster
 import Browser
 import Browser.Navigation as Nav
+import Calendar
 import Common exposing (activeAttrs, color, defaultAttrs, mouseOverAttrs, viewLoading, viewSubMenu)
-import Dict exposing (Dict)
 import Element exposing (Element, column, el, fill, layout, link, mouseOver, padding, paddingXY, row, shrink, spacing, text, width)
 import Element.Background as Background
 import Element.Border as Border
@@ -42,6 +42,7 @@ type Route
     = HomeRoute
     | BaseRosterRoute BaseRoster.Route
     | RequestsRoute Requests.Route
+    | CalendarRoute Calendar.Route
 
 
 routeParser : Parser (Route -> a) a
@@ -50,6 +51,7 @@ routeParser =
         [ Url.Parser.map HomeRoute top
         , Url.Parser.map BaseRosterRoute BaseRoster.routeParser
         , Url.Parser.map RequestsRoute Requests.routeParser
+        , Url.Parser.map CalendarRoute Calendar.routeParser
         ]
 
 
@@ -72,6 +74,9 @@ stepUrl url model =
 
                 Just (RequestsRoute subroute) ->
                     Requests.urlChanged subroute |> Tuple.mapBoth RequestsData (Cmd.map RequestsMsg)
+
+                Just (CalendarRoute subroute) ->
+                    Calendar.urlChanged subroute |> Tuple.mapBoth CalendarData (Cmd.map CalendarMsg)
     in
     ( { model | route = route, data = data }, cmd )
 
@@ -108,30 +113,7 @@ type Data
     | Home
     | BaseRosterData BaseRoster.Model
     | RequestsData Requests.Model
-
-
-type alias RequestShift =
-    { added : Time.Posix
-    , start : Time.Posix
-    , finish : Time.Posix
-    , user : UserAssignment
-    }
-
-
-type alias RequestUser =
-    { start : Time.Posix
-    , finish : Time.Posix
-    , added : Time.Posix
-    , shift : Shift
-    }
-
-
-type alias BaseRosterUser =
-    Dict String (List String)
-
-
-type alias BaseRosterShift =
-    Dict String (List UserAssignment)
+    | CalendarData Calendar.Model
 
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -148,6 +130,7 @@ type Msg
     | UrlChanged Url.Url
     | BaseRosterMsg BaseRoster.Msg
     | RequestsMsg Requests.Msg
+    | CalendarMsg Calendar.Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -170,6 +153,9 @@ update msg model =
         RequestsMsg subMsg ->
             ( { model | data = RequestsData (Requests.update subMsg) }, Cmd.none )
 
+        CalendarMsg subMsg ->
+            ( { model | data = CalendarData (Calendar.update subMsg) }, Cmd.none )
+
 
 
 -- SUBSCRIPTIONS
@@ -182,17 +168,6 @@ subscriptions _ =
 
 
 -- VIEW
-
-
-anchor : List (Element.Attribute msg)
-anchor =
-    [ Font.size 16
-    , paddingXY 8 4
-    , Border.rounded 4
-    , width fill
-    , mouseOver mouseOverAttrs
-    ]
-        ++ defaultAttrs
 
 
 view : Model -> Browser.Document Msg
@@ -244,6 +219,9 @@ navLinks route =
 
                 RequestsRoute subroute ->
                     Requests.navBar subroute
+
+                CalendarRoute subroute ->
+                    Calendar.navBar subroute
            )
 
 
@@ -278,6 +256,7 @@ viewData model =
             viewSubMenu
                 [ BaseRoster.rootLink
                 , Requests.rootLink
+                , Calendar.rootLink
                 ]
 
         BaseRosterData data ->
@@ -285,3 +264,6 @@ viewData model =
 
         RequestsData data ->
             Requests.view model.zone data
+
+        CalendarData data ->
+            Calendar.view data

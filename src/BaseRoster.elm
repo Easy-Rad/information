@@ -1,6 +1,6 @@
-module BaseRoster exposing (Model, Msg, Route, navBar, rootLink, rootUrl, routeParser, update, urlChanged, view)
+module BaseRoster exposing (Model, Msg, Route, navBar, rootLink, routeParser, update, urlChanged, view)
 
-import Common exposing (Shift, User, UserAssignment, anchor, apiBaseUrl, color, decodedString, transformShift, transformUser, userAssignmentDecoder, viewHttpError, viewLoading, viewSubMenu)
+import Common exposing (Shift, User, UserAssignment, anchor, api, color, decodedString, shiftPath, shiftsPath, transformShift, transformUser, userAssignmentDecoder, userPath, usersPath, viewHttpError, viewLoading, viewSubMenu)
 import Dict exposing (Dict)
 import Element exposing (Column, Element, centerY, column, el, fill, height, link, padding, shrink, spacing, table, text, width)
 import Element.Background as Background
@@ -9,6 +9,7 @@ import Http
 import Json.Decode exposing (Decoder)
 import List exposing (range)
 import Tuple exposing (first, second)
+import Url.Builder exposing (absolute)
 import Url.Parser exposing ((</>), Parser, oneOf, s, string, top)
 
 
@@ -42,20 +43,20 @@ type Route
     | ShiftRoute Shift
 
 
-rootUrl : String
-rootUrl =
-    "/base_roster"
+rootPath : String
+rootPath =
+    "base_roster"
 
 
 routeParser : Parser (Route -> a) a
 routeParser =
-    s "base_roster"
+    s rootPath
         </> oneOf
                 [ Url.Parser.map HomeRoute top
-                , Url.Parser.map UsersRoute (s "users")
-                , Url.Parser.map UserRoute (s "user" </> string)
-                , Url.Parser.map ShiftsRoute (s "shifts")
-                , Url.Parser.map ShiftRoute (s "shift" </> decodedString)
+                , Url.Parser.map UsersRoute (s usersPath)
+                , Url.Parser.map UserRoute (s userPath </> string)
+                , Url.Parser.map ShiftsRoute (s shiftsPath)
+                , Url.Parser.map ShiftRoute (s shiftPath </> decodedString)
                 ]
 
 
@@ -113,37 +114,27 @@ update msg =
 
 rootLink : ( String, String )
 rootLink =
-    ( rootUrl, "Base Roster" )
-
-
-usersUrl : String
-usersUrl =
-    rootUrl ++ "/users"
+    ( absolute [ rootPath ] [], "Base Roster" )
 
 
 usersLink : ( String, String )
 usersLink =
-    ( usersUrl, "Users" )
-
-
-shiftsUrl : String
-shiftsUrl =
-    rootUrl ++ "/shifts"
+    ( absolute [ rootPath, usersPath ] [], "Users" )
 
 
 shiftsLink : ( String, String )
 shiftsLink =
-    ( shiftsUrl, "Shifts" )
+    ( absolute [ rootPath, shiftsPath ] [], "Shifts" )
 
 
 userUrl : String -> String
 userUrl user =
-    rootUrl ++ "/user/" ++ user
+    absolute [ rootPath, userPath, user ] []
 
 
 shiftUrl : String -> String
 shiftUrl shift =
-    rootUrl ++ "/shift/" ++ shift
+    absolute [ rootPath, shiftPath, shift ] []
 
 
 
@@ -253,41 +244,24 @@ viewCell base_roster transform dayIndex weekIndex =
 -- API
 
 
-apiUrl : String
-apiUrl =
-    apiBaseUrl ++ rootUrl
-
-
 getUsers : Cmd Msg
 getUsers =
-    Http.get
-        { url = apiUrl ++ "/users"
-        , expect = Http.expectJson GotUsers (Json.Decode.list userAssignmentDecoder)
-        }
+    api [ rootPath, usersPath ] [] GotUsers (Json.Decode.list userAssignmentDecoder)
 
 
 getShifts : Cmd Msg
 getShifts =
-    Http.get
-        { url = apiUrl ++ "/shifts"
-        , expect = Http.expectJson GotShifts (Json.Decode.list Json.Decode.string)
-        }
+    api [ rootPath, shiftsPath ] [] GotShifts (Json.Decode.list Json.Decode.string)
 
 
 getUser : User -> Cmd Msg
 getUser user =
-    Http.get
-        { url = apiUrl ++ "/user/" ++ user
-        , expect = Http.expectJson GotUser userRosterDecoder
-        }
+    api [ rootPath, userPath, user ] [] GotUser userRosterDecoder
 
 
 getShift : Shift -> Cmd Msg
 getShift shift =
-    Http.get
-        { url = apiUrl ++ "/shift/" ++ shift
-        , expect = Http.expectJson GotShift shiftRosterDecoder
-        }
+    api [ rootPath, shiftPath, shift ] [] GotShift shiftRosterDecoder
 
 
 

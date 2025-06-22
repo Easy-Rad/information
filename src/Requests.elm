@@ -1,12 +1,13 @@
-module Requests exposing (Model, Msg, Route, navBar, rootLink, rootUrl, routeParser, update, urlChanged, view)
+module Requests exposing (Model, Msg, Route, navBar, rootLink, routeParser, update, urlChanged, view)
 
-import Common exposing (Shift, User, UserAssignment, anchor, apiBaseUrl, decodedString, posixDecoder, posixToString, transformShift, transformUser, userAssignmentDecoder, viewHttpError, viewLoading, viewSubMenu)
+import Common exposing (Shift, User, UserAssignment, anchor, api, decodedString, posixDecoder, posixToString, shiftPath, shiftsPath, transformShift, transformUser, userAssignmentDecoder, userPath, usersPath, viewHttpError, viewLoading, viewSubMenu)
 import Element exposing (Column, Element, el, fill, link, paddingXY, shrink, spacing, table, text)
 import Element.Font as Font
 import Http
 import Json.Decode exposing (Decoder)
 import List
 import Time exposing (Posix)
+import Url.Builder exposing (absolute)
 import Url.Parser exposing ((</>), Parser, oneOf, s, string, top)
 
 
@@ -48,20 +49,20 @@ type Route
     | ShiftRoute Shift
 
 
-rootUrl : String
-rootUrl =
-    "/requests"
+rootPath : String
+rootPath =
+    "requests"
 
 
 routeParser : Parser (Route -> a) a
 routeParser =
-    s "requests"
+    s rootPath
         </> oneOf
                 [ Url.Parser.map HomeRoute top
-                , Url.Parser.map UsersRoute (s "users")
-                , Url.Parser.map UserRoute (s "user" </> string)
-                , Url.Parser.map ShiftsRoute (s "shifts")
-                , Url.Parser.map ShiftRoute (s "shift" </> decodedString)
+                , Url.Parser.map UsersRoute (s usersPath)
+                , Url.Parser.map UserRoute (s userPath </> string)
+                , Url.Parser.map ShiftsRoute (s shiftsPath)
+                , Url.Parser.map ShiftRoute (s shiftPath </> decodedString)
                 ]
 
 
@@ -119,37 +120,27 @@ update msg =
 
 rootLink : ( String, String )
 rootLink =
-    ( rootUrl, "Requests" )
-
-
-usersUrl : String
-usersUrl =
-    rootUrl ++ "/users"
+    ( absolute [ rootPath ] [], "Requests" )
 
 
 usersLink : ( String, String )
 usersLink =
-    ( usersUrl, "Users" )
-
-
-shiftsUrl : String
-shiftsUrl =
-    rootUrl ++ "/shifts"
+    ( absolute [ rootPath, usersPath ] [], "Users" )
 
 
 shiftsLink : ( String, String )
 shiftsLink =
-    ( shiftsUrl, "Shifts" )
+    ( absolute [ rootPath, shiftsPath ] [], "Shifts" )
 
 
 userUrl : String -> String
 userUrl user =
-    rootUrl ++ "/user/" ++ user
+    absolute [ rootPath, userPath, user ] []
 
 
 shiftUrl : String -> String
 shiftUrl shift =
-    rootUrl ++ "/shift/" ++ shift
+    absolute [ rootPath, shiftPath, shift ] []
 
 
 
@@ -158,7 +149,7 @@ shiftUrl shift =
 
 navBar : Route -> List ( String, String )
 navBar route =
-    ( rootUrl, "Requests" )
+    rootLink
         :: (case route of
                 HomeRoute ->
                     []
@@ -220,7 +211,6 @@ viewRequests zone header transform requests =
         viewShift ( url, label ) =
             link anchor { url = url, label = text label }
 
-        -- link anchor { url = "/requests/shift/" ++ shift, label = text shift }
         padCell : Element msg -> Element msg
         padCell =
             el [ paddingXY 4 0 ]
@@ -243,50 +233,27 @@ viewRequests zone header transform requests =
 
 
 
--- transformRequestShift : Shift -> ( String, String )
--- transformRequestShift shift =
---     ( "/requests/shift/" ++ shift, shift )
--- transformRequestUser : UserAssignment -> ( String, String )
--- transformRequestUser user =
---     ( "/requests/user/" ++ user.user, user.lastname ++ ", " ++ user.firstname )
 -- API
-
-
-apiUrl : String
-apiUrl =
-    apiBaseUrl ++ rootUrl
 
 
 getUsers : Cmd Msg
 getUsers =
-    Http.get
-        { url = apiUrl ++ "/users"
-        , expect = Http.expectJson GotUsers (Json.Decode.list userAssignmentDecoder)
-        }
+    api [ rootPath, usersPath ] [] GotUsers (Json.Decode.list userAssignmentDecoder)
 
 
 getShifts : Cmd Msg
 getShifts =
-    Http.get
-        { url = apiUrl ++ "/shifts"
-        , expect = Http.expectJson GotShifts (Json.Decode.list Json.Decode.string)
-        }
+    api [ rootPath, shiftsPath ] [] GotShifts (Json.Decode.list Json.Decode.string)
 
 
 getUser : User -> Cmd Msg
 getUser user =
-    Http.get
-        { url = apiUrl ++ "/user/" ++ user
-        , expect = Http.expectJson GotUser (Json.Decode.list userRequestDecoder)
-        }
+    api [ rootPath, userPath, user ] [] GotUser (Json.Decode.list userRequestDecoder)
 
 
 getShift : Shift -> Cmd Msg
 getShift shift =
-    Http.get
-        { url = apiUrl ++ "/shift/" ++ shift
-        , expect = Http.expectJson GotShift (Json.Decode.list shiftRequestDecoder)
-        }
+    api [ rootPath, shiftPath, shift ] [] GotShift (Json.Decode.list shiftRequestDecoder)
 
 
 

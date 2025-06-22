@@ -8,12 +8,36 @@ import Http
 import Json.Decode exposing (Decoder)
 import Time
 import Url
+import Url.Builder
 import Url.Parser
 
 
-apiBaseUrl : String
-apiBaseUrl =
-    "https://api.easyrad.duckdns.org"
+api : List String -> List Url.Builder.QueryParameter -> (Result Http.Error a -> msg) -> Decoder a -> Cmd msg
+api pathSegments parameters toMsg decoder =
+    Http.get
+        { url = Url.Builder.crossOrigin "https://api.easyrad.duckdns.org" pathSegments parameters
+        , expect = Http.expectJson toMsg decoder
+        }
+
+
+usersPath : String
+usersPath =
+    "users"
+
+
+userPath : String
+userPath =
+    "user"
+
+
+shiftsPath : String
+shiftsPath =
+    "shifts"
+
+
+shiftPath : String
+shiftPath =
+    "shift"
 
 
 
