@@ -1,20 +1,20 @@
 module Roster exposing (..)
 
 import BaseRoster exposing (Msg)
-import Common exposing (Shift, User, activeAttrs, anchor, api, viewHttpError, viewLoading)
+import Common exposing (Shift, User, activeAttrs, anchor, api, color, defaultAttrs, mouseOverAttrs, viewHttpError, viewLoading)
 import Date exposing (Date, Interval(..), Unit(..))
 import Dict exposing (Dict)
-import Element exposing (Attribute, Column, Element, alignTop, column, el, fill, height, htmlAttribute, inFront, link, mouseOver, padding, rgb, rgba, row, shrink, spacing, table, text, transparent, width)
+import Element exposing (Attribute, Column, Element, alignTop, column, el, fill, height, htmlAttribute, inFront, link, mouseOver, padding, paddingXY, rgb255, rgba255, row, shrink, spacing, table, text, transparent, width)
 import Element.Background
 import Element.Border as Border
-import Element.Font as Font
+import Element.Font as Font exposing (bold)
 import Element.Input as Input
 import Html.Attributes
 import Http
 import Json.Decode exposing (Decoder, dict, index, int, string)
-import List
+import List exposing (filterMap)
 import Maybe
-import Time exposing (Month(..))
+import Time exposing (Month(..), Weekday(..))
 import Tuple exposing (pair)
 import Url.Builder exposing (absolute)
 import Url.Parser exposing ((</>), (<?>), Parser, s)
@@ -27,7 +27,7 @@ import Url.Parser.Query
 
 type alias Model =
     { searchParams : SearchParams
-    , showSingleUserByShift : Bool
+    , tableView : Bool
     , data : Data
     }
 
@@ -94,9 +94,8 @@ routeParser =
 
 
 type Msg
-    = UpdateSearchParams SearchParams
-    | GotCalendar (Result Http.Error Calendar)
-    | ShowSingleUserByShift Bool
+    = GotCalendar (Result Http.Error Calendar)
+    | TableView Bool
 
 
 routeToParams : Route -> SearchParams
@@ -131,9 +130,6 @@ urlChanged route =
 update : Model -> Msg -> Model
 update model msg =
     case msg of
-        UpdateSearchParams searchParams ->
-            { model | searchParams = searchParams }
-
         GotCalendar data ->
             { model
                 | data =
@@ -145,8 +141,8 @@ update model msg =
                             HttpError err
             }
 
-        ShowSingleUserByShift showSingleUserByShift ->
-            { model | showSingleUserByShift = showSingleUserByShift }
+        TableView tableView ->
+            { model | tableView = tableView }
 
 
 rootLink : ( String, String )
@@ -192,8 +188,13 @@ view model =
 
         Data calendar ->
             let
-                _ =
-                    [ alignTop, padding 8, spacing 8, Border.width 2, Border.rounded 5 ]
+                toggle_calendar_view =
+                    Input.checkbox []
+                        { onChange = TableView
+                        , icon = Input.defaultCheckbox
+                        , checked = model.tableView
+                        , label = Input.labelRight [] (text "Table view")
+                        }
             in
             column [ spacing 8 ]
                 [ row [ spacing 4 ] <|
@@ -209,24 +210,29 @@ view model =
                             link (anchor ++ activeAttrs) { url = buildUrl { params | filterUser = Nothing, filterShift = Nothing }, label = text "Clear filters" }
                     )
                         :: viewDateLinks model.searchParams (List.head calendar.dates)
-                , case model.searchParams.filterUser of
-                    Just user ->
-                        column []
-                            [ Input.checkbox []
-                                { onChange = ShowSingleUserByShift
-                                , icon = Input.defaultCheckbox
-                                , checked = model.showSingleUserByShift
-                                , label = Input.labelRight [] (text "View by shift")
-                                }
-                            , if model.showSingleUserByShift then
-                                viewCalendar model.searchParams calendar
+                , case ( model.searchParams.filterUser, model.searchParams.filterShift, model.searchParams.dateRange ) of
+                    ( Just _, Nothing, Range _ _ ) ->
+                        toggle_calendar_view
 
-                              else
-                                viewCalendarForUser user model.searchParams.dateRange model.searchParams.filterShift calendar
-                            ]
+                    ( Nothing, Just _, Range _ _ ) ->
+                        toggle_calendar_view
 
-                    Nothing ->
-                        viewCalendar model.searchParams calendar
+                    _ ->
+                        Element.none
+                , case ( model.tableView, model.searchParams.dateRange ) of
+                    ( False, Range first last ) ->
+                        case ( model.searchParams.filterUser, model.searchParams.filterShift ) of
+                            ( Just user, Nothing ) ->
+                                viewCalendarForUser model.searchParams user calendar (fromDateInt first) (fromDateInt last)
+
+                            ( Nothing, Just shiftId ) ->
+                                viewCalendarForShift model.searchParams shiftId calendar (fromDateInt first) (fromDateInt last)
+
+                            _ ->
+                                viewTable model.searchParams calendar
+
+                    _ ->
+                        viewTable model.searchParams calendar
                 ]
 
 
@@ -255,13 +261,13 @@ viewDateLinks params date =
 myTooltip : String -> Element msg
 myTooltip str =
     el
-        [ Element.Background.color (rgb 0 0 0)
-        , Font.color (rgb 1 1 1)
+        [ Element.Background.color (rgb255 0 0 0)
+        , Font.color (rgb255 255 255 255)
         , padding 4
         , Border.rounded 5
         , Font.size 14
         , Border.shadow
-            { offset = ( 0, 3 ), blur = 6, size = 0, color = rgba 0 0 0 0.32 }
+            { offset = ( 0, 3 ), blur = 6, size = 0, color = rgba255 0 0 0 0.32 }
         ]
         (text str)
 
@@ -288,8 +294,6 @@ cellAttrs : List (Element.Attribute msg)
 cellAttrs =
     [ width fill
     , height fill
-
-    -- , Border.widthEach {bottom=0, left=0, right=1, top=1}
     , Border.width 1
     , padding 4
     ]
@@ -314,12 +318,12 @@ buildUrl params =
         |> Url.Builder.absolute [ rootPath ]
 
 
-viewUser : (User -> SearchParams) -> ( String, ( String, String ) ) -> Element msg
-viewUser getSearchParams ( user_code, ( first_name, last_name ) ) =
+viewUser : List (Element.Attribute msg) -> (User -> SearchParams) -> ( String, ( String, String ) ) -> Element msg
+viewUser attrs getSearchParams ( user_code, ( first_name, last_name ) ) =
     link
-        [ tooltip Element.above (myTooltip <| first_name ++ " " ++ last_name)
-        , width shrink
-        ]
+        (tooltip Element.above (myTooltip <| first_name ++ " " ++ last_name)
+            :: attrs
+        )
         { url = buildUrl (getSearchParams user_code)
         , label = user_code |> text
         }
@@ -341,7 +345,7 @@ viewCell getSearchParams userDict users =
                 Dict.get user_code userDict
                     |> Maybe.map (pair user_code)
             )
-        |> List.map (viewUser getSearchParams)
+        |> List.map (viewUser [ width shrink ] getSearchParams)
         |> column cellAttrs
 
 
@@ -350,14 +354,9 @@ headerBaseAttrs =
     Font.bold :: cellAttrs
 
 
-dateFormat : String
-dateFormat =
-    "E d/MM"
-
-
 viewColumnHeader : (DateRange -> SearchParams) -> Date -> Element msg
 viewColumnHeader getSearchParams date =
-    link headerBaseAttrs { url = buildUrl (toDateInt date |> Day |> getSearchParams), label = date |> Date.format dateFormat |> text }
+    link headerBaseAttrs { url = buildUrl (toDateInt date |> Day |> getSearchParams), label = date |> Date.format "E d/MM" |> text }
 
 
 viewRowHeader : SearchParams -> ShiftRecord -> Element msg
@@ -380,8 +379,8 @@ updateFilterUser searchParams user =
     { searchParams | filterUser = Just user }
 
 
-viewCalendar : SearchParams -> Calendar -> Element msg
-viewCalendar params calendar =
+viewTable : SearchParams -> Calendar -> Element msg
+viewTable params calendar =
     let
         mapper : Date -> Column ShiftRecord msg
         mapper date =
@@ -396,58 +395,175 @@ viewCalendar params calendar =
         }
 
 
-viewCalendarForUser : User -> DateRange -> Maybe Int -> Calendar -> Element msg
-viewCalendarForUser user dateRange filterShift calendar =
+weekdayToName : Time.Weekday -> String
+weekdayToName weekday =
+    case weekday of
+        Mon ->
+            "Monday"
+
+        Tue ->
+            "Tuesday"
+
+        Wed ->
+            "Wednesday"
+
+        Thu ->
+            "Thursday"
+
+        Fri ->
+            "Friday"
+
+        Sat ->
+            "Saturday"
+
+        Sun ->
+            "Sunday"
+
+
+weekdayToInterval : Time.Weekday -> Interval
+weekdayToInterval weekday =
+    case weekday of
+        Mon ->
+            Monday
+
+        Tue ->
+            Tuesday
+
+        Wed ->
+            Wednesday
+
+        Thu ->
+            Thursday
+
+        Fri ->
+            Friday
+
+        Sat ->
+            Saturday
+
+        Sun ->
+            Sunday
+
+
+viewCalendar : (Date -> List ( Maybe String, String, SearchParams )) -> Date -> Date -> Element msg
+viewCalendar getCellItems firstDate lastDate =
     let
-        onUpdateDate : DateRange -> SearchParams
-        onUpdateDate newDateRange =
-            SearchParams newDateRange (Just user) filterShift
+        viewCellItem : ( Maybe String, String, SearchParams ) -> Element msg
+        viewCellItem ( tooltip_label, item_label, searchParams ) =
+            link (tooltip_label |> Maybe.map (myTooltip >> tooltip Element.above >> List.singleton) |> Maybe.withDefault [])
+                { url = buildUrl searchParams
+                , label = text item_label
+                }
 
-        onUpdateShift : Int -> SearchParams
-        onUpdateShift shiftId =
-            SearchParams dateRange Nothing (Just shiftId)
+        viewCalendarCell : Date -> Element msg
+        viewCalendarCell date =
+            if Date.isBetween firstDate lastDate date then
+                column
+                    [ width fill
+                    , height (Element.minimum 80 fill)
+                    , Border.width 1
+                    ]
+                    [ link
+                        ([ width fill
+                         , padding 4
+                         , mouseOver mouseOverAttrs
+                         ]
+                            ++ defaultAttrs
+                        )
+                        { url = buildUrl (onSelectDate date)
+                        , label = date |> Date.format "d/MM/yy" |> text
+                        }
+                    , getCellItems date
+                        |> List.map viewCellItem
+                        |> column
+                            [ height fill
+                            , padding 4
+                            , spacing 4
+                            ]
+                    ]
 
-        mapper : Date -> Column User msg
-        mapper date =
+            else
+                el cellAttrs Element.none
+
+        onSelectDate : Date -> SearchParams
+        onSelectDate date =
+            SearchParams (toDateInt date |> Day) Nothing Nothing
+
+        weekdayColumn : Date.Weekday -> Column Date msg
+        weekdayColumn weekday =
             Column
-                (viewColumnHeader onUpdateDate date)
+                (weekdayToName weekday |> text |> el (Font.center :: headerBaseAttrs))
                 shrink
-                (viewUserShiftCell date)
-
-        filterMapFn : Date -> User -> ShiftRecord -> Maybe (Element msg)
-        filterMapFn date currentUser shift =
-            Dict.get (Date.toRataDie date) shift.usersByDay
-                |> Maybe.andThen
-                    (\users ->
-                        if List.any ((==) currentUser) users then
-                            Just (viewShift [] onUpdateShift shift.shiftName shift.shiftId)
-
-                        else
-                            Nothing
-                    )
-
-        viewUserShiftCell : Date -> User -> Element msg
-        viewUserShiftCell date currentUser =
-            calendar.shifts
-                |> List.filterMap (filterMapFn date currentUser)
-                -- (\shift ->
-                --     Dict.get (Date.toRataDie date) shift.usersByDay
-                -- )
-                --     (.usersByDay >> Dict.get (Date.toRataDie date))
-                -- |> List.any ((==) currentUser)
-                |> column cellAttrs
-
-        --     mapper : Date -> Column ShiftRecord msg
-        --     mapper date =
-        --         Column
-        --             (viewColumnHeader onUpdateDate date)
-        --             shrink
-        --             (.usersByDay >> Dict.get (Date.toRataDie date) >> Maybe.map ( onUpdateUser calendar.users) >> Maybe.withDefault (el cellAttrs Element.none))
+                (Date.ceiling (weekdayToInterval weekday) >> viewCalendarCell)
     in
     table [ Border.width 1, width shrink ]
-        { data = [ user ]
-        , columns = calendar.dates |> List.map mapper
+        { data = Date.range Date.Day 7 (Date.floor Monday firstDate) (Date.ceiling Sunday lastDate)
+        , columns = List.range 1 7 |> List.map (Date.numberToWeekday >> weekdayColumn)
         }
+
+
+viewCalendarForUser : SearchParams -> User -> Calendar -> Date -> Date -> Element msg
+viewCalendarForUser searchParams user calendar =
+    let
+        mapUsers : ShiftRecord -> List User -> Maybe ( Maybe String, String, SearchParams )
+        mapUsers shift users =
+            if List.any ((==) user) users then
+                Just ( Nothing, shift.shiftName, { searchParams | filterShift = Just shift.shiftId, filterUser = Nothing } )
+
+            else
+                Nothing
+
+        filterByDate : Date -> ShiftRecord -> Maybe ( Maybe String, String, SearchParams )
+        filterByDate date shift =
+            Dict.get (Date.toRataDie date) shift.usersByDay
+                |> Maybe.andThen (mapUsers shift)
+
+        getCellItems : Date -> List ( Maybe String, String, SearchParams )
+        getCellItems date =
+            calendar.shifts |> List.filterMap (filterByDate date)
+    in
+    viewCalendar getCellItems
+
+
+viewCalendarForShift : SearchParams -> Int -> Calendar -> Date -> Date -> Element msg
+viewCalendarForShift searchParams shiftId calendar =
+    let
+        onUpdateUser : User -> SearchParams
+        onUpdateUser user =
+            { searchParams | filterUser = Just user, filterShift = Nothing }
+
+        userLabel : User -> Maybe String
+        userLabel user =
+            Dict.get user calendar.users |> Maybe.map (\( first_name, last_name ) -> first_name ++ " " ++ last_name)
+
+        mapFn : Int -> List User -> List ( Maybe String, String, SearchParams )
+        mapFn _ =
+            List.map (\user -> ( userLabel user, user, onUpdateUser user ))
+
+        foldUsersByDay : List ShiftRecord -> Dict Int (List ( Maybe String, String, SearchParams ))
+        foldUsersByDay shifts =
+            case shifts of
+                [] ->
+                    Dict.empty
+
+                shift :: xs ->
+                    if shift.shiftId == shiftId then
+                        shift.usersByDay
+                            |> Dict.map mapFn
+
+                    else
+                        foldUsersByDay xs
+
+        usersByDay : Dict Int (List ( Maybe String, String, SearchParams ))
+        usersByDay =
+            foldUsersByDay calendar.shifts
+
+        getCellItems : Date -> List ( Maybe String, String, SearchParams )
+        getCellItems date =
+            Dict.get (Date.toRataDie date) usersByDay
+                |> Maybe.withDefault []
+    in
+    viewCalendar getCellItems
 
 
 
