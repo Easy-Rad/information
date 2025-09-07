@@ -15,6 +15,7 @@ import Time
 import TimeZone
 import Tuple
 import Url
+import Url.Builder exposing (crossOrigin)
 import Url.Parser exposing ((</>), Parser, oneOf, top)
 
 
@@ -257,9 +258,12 @@ viewData model =
 
         Home ->
             viewSubMenu
-                [ BaseRoster.rootLink
+                [ Roster.rootLink
+                , BaseRoster.rootLink
                 , Requests.rootLink
-                , Roster.rootLink
+                , ( crossOrigin "https://wally.easyrad.duckdns.org" [] [], "Radiology locator" )
+                , ( crossOrigin "https://dashboard.easyrad.duckdns.org" [] [], "MIT dashboard" )
+                , ( crossOrigin "https://easyris.easyrad.duckdns.org" [] [], "Easy RIS" )
                 ]
 
         BaseRosterData data ->
