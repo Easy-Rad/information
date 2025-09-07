@@ -3,7 +3,6 @@ module Main exposing (..)
 import BaseRoster
 import Browser
 import Browser.Navigation as Nav
-import Calendar
 import Common exposing (activeAttrs, color, defaultAttrs, mouseOverAttrs, viewLoading, viewSubMenu)
 import Element exposing (Element, column, el, fill, layout, link, mouseOver, padding, paddingXY, row, shrink, spacing, text, width)
 import Element.Background as Background
@@ -11,6 +10,7 @@ import Element.Border as Border
 import Element.Font as Font
 import List
 import Requests
+import Roster
 import Time
 import TimeZone
 import Tuple
@@ -42,7 +42,7 @@ type Route
     = HomeRoute
     | BaseRosterRoute BaseRoster.Route
     | RequestsRoute Requests.Route
-    | CalendarRoute Calendar.Route
+    | CalendarRoute Roster.Route
 
 
 routeParser : Parser (Route -> a) a
@@ -51,7 +51,7 @@ routeParser =
         [ Url.Parser.map HomeRoute top
         , Url.Parser.map BaseRosterRoute BaseRoster.routeParser
         , Url.Parser.map RequestsRoute Requests.routeParser
-        , Url.Parser.map CalendarRoute Calendar.routeParser
+        , Url.Parser.map CalendarRoute Roster.routeParser
         ]
 
 
@@ -76,7 +76,7 @@ stepUrl url model =
                     Requests.urlChanged subroute |> Tuple.mapBoth RequestsData (Cmd.map RequestsMsg)
 
                 Just (CalendarRoute subroute) ->
-                    Calendar.urlChanged subroute |> Tuple.mapBoth CalendarData (Cmd.map CalendarMsg)
+                    Roster.urlChanged subroute |> Tuple.mapBoth CalendarData (Cmd.map CalendarMsg)
     in
     ( { model | route = route, data = data }, cmd )
 
@@ -113,7 +113,7 @@ type Data
     | Home
     | BaseRosterData BaseRoster.Model
     | RequestsData Requests.Model
-    | CalendarData Calendar.Model
+    | CalendarData Roster.Model
 
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -130,13 +130,13 @@ type Msg
     | UrlChanged Url.Url
     | BaseRosterMsg BaseRoster.Msg
     | RequestsMsg Requests.Msg
-    | CalendarMsg Calendar.Msg
+    | CalendarMsg Roster.Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case msg of
-        LinkClicked urlRequest ->
+    case ( msg, model.data ) of
+        ( LinkClicked urlRequest, _ ) ->
             case urlRequest of
                 Browser.Internal url ->
                     ( model, Nav.pushUrl model.key (Url.toString url) )
@@ -144,17 +144,20 @@ update msg model =
                 Browser.External href ->
                     ( model, Nav.load href )
 
-        UrlChanged url ->
+        ( UrlChanged url, _ ) ->
             stepUrl url model
 
-        BaseRosterMsg subMsg ->
+        ( BaseRosterMsg subMsg, BaseRosterData _ ) ->
             ( { model | data = BaseRosterData (BaseRoster.update subMsg) }, Cmd.none )
 
-        RequestsMsg subMsg ->
+        ( RequestsMsg subMsg, RequestsData _ ) ->
             ( { model | data = RequestsData (Requests.update subMsg) }, Cmd.none )
 
-        CalendarMsg subMsg ->
-            ( { model | data = CalendarData (Calendar.update subMsg) }, Cmd.none )
+        ( CalendarMsg subMsg, CalendarData subModel ) ->
+            ( { model | data = CalendarData (Roster.update subModel subMsg) }, Cmd.none )
+
+        _ ->
+            ( model, Cmd.none )
 
 
 
@@ -221,7 +224,7 @@ navLinks route =
                     Requests.navBar subroute
 
                 CalendarRoute subroute ->
-                    Calendar.navBar subroute
+                    Roster.navBar subroute
            )
 
 
@@ -246,7 +249,7 @@ viewNavBar route =
                 List.indexedMap (\index ( url, label ) -> navBarLink url label (index == List.length links - 1)) links
 
 
-viewData : Model -> Element msg
+viewData : Model -> Element Msg
 viewData model =
     case model.data of
         Loading ->
@@ -256,7 +259,7 @@ viewData model =
             viewSubMenu
                 [ BaseRoster.rootLink
                 , Requests.rootLink
-                , Calendar.rootLink
+                , Roster.rootLink
                 ]
 
         BaseRosterData data ->
@@ -266,4 +269,4 @@ viewData model =
             Requests.view model.zone data
 
         CalendarData data ->
-            Calendar.view data
+            Roster.view data |> Element.map CalendarMsg
